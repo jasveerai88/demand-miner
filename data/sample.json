@@ -1,0 +1,44 @@
+{
+ "mentions": [
+  {
+   "source": "forum",
+   "text": "Looking for someone to build a website for my business \u2014 how much does it cost? Any recommendations?",
+   "url": "https://example.com/post/1",
+   "author": "Maya",
+   "engagement": 25,
+   "date": "2026-11-01"
+  },
+  {
+   "source": "community",
+   "text": "I need help with my website \u2014 my current designer ghosted me and I am frustrated. Need someone reliable near Kelowna?",
+   "url": "https://example.com/post/2",
+   "author": "Harpreet",
+   "engagement": 5,
+   "date": "2026-11-02"
+  },
+  {
+   "source": "forum",
+   "text": "We offer website design \u2014 DM me, our agency can help. Book a call for a free consultation!",
+   "url": "https://example.com/post/3",
+   "author": "AgencyAds",
+   "engagement": 200,
+   "date": "2026-11-02"
+  },
+  {
+   "source": "forum",
+   "text": "Looking for a plumber for my business, any recommendations?",
+   "url": "https://example.com/post/4",
+   "author": "OffNiche",
+   "engagement": 50,
+   "date": "2026-11-02"
+  },
+  {
+   "source": "social",
+   "text": "I really like this website design I saw today.",
+   "url": "https://example.com/post/5",
+   "author": "Casual",
+   "engagement": 2,
+   "date": "2026-11-03"
+  }
+ ]
+}
