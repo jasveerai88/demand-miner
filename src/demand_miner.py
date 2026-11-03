@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Demand Miner v0.2 — turn captured public mentions into ranked buyer leads.
+Demand Miner v0.2.2 — turn captured public mentions into ranked buyer leads.
 
 The free answer to ₹8,500+/mo lead tools: you bring mentions captured from
 public posts/comments (social search, comment exports, forum threads); the
@@ -17,7 +17,7 @@ Exit codes: 0 ok, 1 error.
 import argparse, csv, json, re, sys
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.2"
 
 STRONG = ["looking for", "need someone", "need a ", "need an ", "hire", "hiring",
           "want to hire", "any recommendations", "recommend a", "recommend someone",
@@ -44,9 +44,29 @@ SELLER = ["i offer", "we offer", "dm me", "hire me", "my services",
 STOPLOC = {"The", "A", "An", "My", "Our", "This", "That", "It", "I"}
 
 
+def _keyword_patterns(keywords):
+    """Compile word-boundary-aware patterns for the niche keywords.
+
+    A keyword only matches as a whole word (or whole phrase, for
+    multi-word keywords): ``site`` must NOT match inside "opposite",
+    "parasite" or "sitemap". Boundaries are enforced at both ends with
+    (?<!\\w) / (?!\\w) around the escaped keyword, case-insensitively
+    (the text is lowercased before matching and keywords are lowered
+    here too).
+    """
+    pats = []
+    for k in keywords or []:
+        if not isinstance(k, str):
+            continue
+        k = k.strip().lower()
+        if k:
+            pats.append(re.compile(r"(?<!\w)" + re.escape(k) + r"(?!\w)"))
+    return pats
+
+
 def score_mention(text, keywords):
     t = " " + text.lower().strip() + " "
-    if not any(k in t for k in keywords):
+    if not any(p.search(t) for p in _keyword_patterns(keywords)):
         return None  # off-niche: not scored at all
     seller = any(s in t for s in SELLER)
     score, hits = 0, []
@@ -69,40 +89,95 @@ def location_hint(text):
     return ""
 
 
+def _parse_engagement(value):
+    """Return engagement as an int, or raise ValueError if unusable.
+
+    Missing/None/empty-string engagement counts as 0 (as before).
+    A non-numeric value ("abc", a list, a dict, a bool) raises, and the
+    caller treats the whole mention as malformed and skips it — that
+    policy is documented in the README ("How malformed mentions are
+    handled").
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        raise ValueError("engagement is not a number")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return 0
+        return int(float(s))  # raises ValueError on "abc" etc.
+    raise ValueError("engagement is not a number")
+
+
 def mine(mentions, keywords, min_score=4):
-    leads, sellers, below, off_niche = [], 0, 0, 0
+    """Mine mentions into leads, tolerating malformed mentions.
+
+    Per-mention tolerance: a mention that is not a dict, has no usable
+    text, or carries a non-numeric engagement value is SKIPPED and
+    counted in ``skipped_malformed`` — it never aborts the run, and the
+    count is printed in the report. Valid mentions always process.
+    """
+    leads, sellers, below, off_niche, skipped = [], 0, 0, 0, 0
+    if mentions is None:
+        mentions = []
     for m in mentions:
-        text = str(m.get("text", "")).strip()
-        if not text:
+        if not isinstance(m, dict):
+            skipped += 1
             continue
-        r = score_mention(text, keywords)
-        if r is None:
-            off_niche += 1
+        try:
+            raw_text = m.get("text", "")
+            if not isinstance(raw_text, str):
+                skipped += 1
+                continue
+            text = raw_text.strip()
+            if not text:
+                skipped += 1
+                continue
+            r = score_mention(text, keywords)
+            if r is None:
+                off_niche += 1
+                continue
+            if r["seller"]:
+                sellers += 1
+                continue
+            try:
+                eng = _parse_engagement(m.get("engagement"))
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+            bonus = 2 if eng >= 100 else (1 if eng >= 10 else 0)
+            total = r["score"] + bonus
+            if total < min_score:
+                below += 1
+                continue
+            leads.append({
+                "score": total, "author": m.get("author", ""), "source": m.get("source", ""),
+                "location": location_hint(text), "quote": re.sub(r"\s+", " ", text)[:160],
+                "url": m.get("url", ""), "signals": ", ".join(sorted(set(r["hits"]))),
+            })
+        except Exception:
+            # Safety net: no single mention may abort the whole run.
+            skipped += 1
             continue
-        if r["seller"]:
-            sellers += 1
-            continue
-        eng = int(m.get("engagement") or 0)
-        bonus = 2 if eng >= 100 else (1 if eng >= 10 else 0)
-        total = r["score"] + bonus
-        if total < min_score:
-            below += 1
-            continue
-        leads.append({
-            "score": total, "author": m.get("author", ""), "source": m.get("source", ""),
-            "location": location_hint(text), "quote": re.sub(r"\s+", " ", text)[:160],
-            "url": m.get("url", ""), "signals": ", ".join(sorted(set(r["hits"]))),
-        })
     leads.sort(key=lambda x: -x["score"])
     return {"leads": leads, "sellers_filtered": sellers, "below_threshold": below,
-            "off_niche": off_niche, "scanned": len(mentions)}
+            "off_niche": off_niche, "scanned": len(mentions),
+            "skipped_malformed": skipped}
 
 
 def render(result, keywords):
     L = [f"DEMAND MINER v{VERSION} — niche: {', '.join(keywords)}",
          f"Scanned {result['scanned']} mentions · {result['sellers_filtered']} sellers filtered · "
-         f"{result['off_niche']} off-niche · {result['below_threshold']} below the lead bar",
-         f"LEADS: {len(result['leads'])}", ""]
+         f"{result['off_niche']} off-niche · {result['below_threshold']} below the lead bar"]
+    if result.get("skipped_malformed"):
+        L.append(f"Skipped {result['skipped_malformed']} malformed mentions "
+                 f"(not an object, no usable text, or non-numeric engagement — see README)")
+    L += [f"LEADS: {len(result['leads'])}", ""]
     for i, lead in enumerate(result["leads"], 1):
         L.append(f"{i}. [score {lead['score']}] {lead['author'] or 'unknown author'} · {lead['source']}"
                  + (f" · near {lead['location']}" if lead["location"] else ""))
@@ -112,6 +187,25 @@ def render(result, keywords):
     return "\n".join(L)
 
 
+def extract_mentions(raw):
+    """Pull the mentions list out of the parsed JSON.
+    Structural problems get an error that says what to fix. (Per-mention
+    problems are different: mine() skips and counts those — see README.)"""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        if "mentions" not in raw:
+            raise ValueError('corpus file has no "mentions" list — the top level must look like '
+                             '{"mentions": [ ...one object per mention... ]} '
+                             "(or pass a bare list of mentions)")
+        mentions = raw["mentions"]
+        if not isinstance(mentions, list):
+            raise ValueError(f'"mentions" must be a list of mention objects, got {type(mentions).__name__} — '
+                             'the top level must look like {"mentions": [ ...one object per mention... ]}')
+        return mentions
+    raise ValueError('corpus file must be a JSON object with a "mentions" list (or a bare list of mentions)')
+
+
 def main():
     ap = argparse.ArgumentParser(description="Demand Miner — ranked buyer leads from public mentions")
     ap.add_argument("corpus")
@@ -119,14 +213,18 @@ def main():
     ap.add_argument("--min-score", type=int, default=4)
     ap.add_argument("--csv", help="also write leads to this CSV path")
     a = ap.parse_args()
+    keywords = [k.strip().lower() for k in a.keywords.split(",") if k.strip()]
+    if not keywords:
+        print("ERROR: no usable keywords — pass at least one keyword via --keywords "
+              "(e.g. --keywords website,\"web design\")")
+        return 1
     path = Path(a.corpus)
     if not path.exists():
         print(f"ERROR: file not found: {path}")
         return 1
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        mentions = raw["mentions"] if isinstance(raw, dict) else raw
-        keywords = [k.strip().lower() for k in a.keywords.split(",") if k.strip()]
+        mentions = extract_mentions(raw)
         result = mine(mentions, keywords, a.min_score)
         print(render(result, keywords))
         if a.csv:
