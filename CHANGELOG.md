@@ -2,6 +2,15 @@
 
 All notable changes to Demand Miner are documented here.
 
+## v0.3.0 — 2026-11-03
+
+Agent-ready release (no behaviour change to the lead sheet):
+
+- **`--json` flag:** prints one JSON object with the same counts and ranked leads as the text sheet (tool, version, keywords, min-score, scanned / sellers-filtered / off-niche / below-threshold / skipped-malformed counts, leads with score, author, source, location, quote, URL and signal list, warnings). Exit codes unchanged; errors in `--json` mode are `{"error": "..."}` with the same message and exit code — never a traceback, never plain text. `--csv` still writes the same file in both modes.
+- **`SKILL.md`** added at the repo root for AI coding agents: purpose, when to use / not use, exact commands, the output JSON schema, exit codes, and the honesty rules (a lead is a scored mention, not a verified buyer; whole-word matching only; fixed-rule scoring).
+- README gained a short "Use with AI agents" section.
+- Tests added for the JSON output (parses, counts and leads agree with the text sheet, JSON error objects on missing file and empty keywords); suite is now 26 tests. The bundled sample still yields the same 2 leads at scores 13 and 12.
+
 ## v0.2.2 — 2026-11-03
 
 Mini-fix release from the delta re-audit:

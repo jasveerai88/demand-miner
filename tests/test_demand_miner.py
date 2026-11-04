@@ -248,5 +248,57 @@ class TestHermeticity(unittest.TestCase):
         self.assertFalse((ROOT / "leads.csv").exists())
 
 
+class JsonOutput(unittest.TestCase):
+    """v0.3.0: --json gives agents one JSON object with the same counts,
+    leads and exit codes as the lead sheet; errors are {"error": ...}."""
+
+    def _run(self, *argv):
+        return subprocess.run([sys.executable, str(ROOT / "src" / "demand_miner.py"), *argv],
+                              capture_output=True, text=True)
+
+    def test_json_parses_with_counts_and_leads(self):
+        r = self._run(str(ROOT / "data" / "sample.json"),
+                      "--keywords", "website,web design,site", "--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["tool"], "demand-miner")
+        self.assertEqual(out["version"], dm.VERSION)
+        self.assertEqual(out["scanned"], 5)
+        self.assertEqual(out["sellers_filtered"], 1)
+        self.assertEqual(out["off_niche"], 1)
+        self.assertEqual(out["below_threshold"], 1)
+        self.assertEqual(out["leads_count"], 2)
+        self.assertEqual([lead["score"] for lead in out["leads"]], [13, 12])
+        top = out["leads"][0]
+        self.assertEqual(top["author"], "Harpreet")
+        self.assertTrue(top["quote"])
+        self.assertTrue(top["url"].startswith("https://"))
+        self.assertIn("need someone", top["signals"])
+
+    def test_json_agrees_with_human_sheet(self):
+        sample = str(ROOT / "data" / "sample.json")
+        human = self._run(sample, "--keywords", "website,web design,site")
+        machine = self._run(sample, "--keywords", "website,web design,site", "--json")
+        self.assertEqual(human.returncode, machine.returncode)
+        self.assertIn("LEADS: 2", human.stdout)
+        out = json.loads(machine.stdout)
+        self.assertEqual(out["leads_count"], 2)
+
+    def test_json_missing_file_is_json_error(self):
+        r = self._run("nope.json", "--keywords", "website", "--json")
+        self.assertEqual(r.returncode, 1)
+        out = json.loads(r.stdout)  # parses — never plain text, never a traceback
+        self.assertIn("error", out)
+        self.assertIn("file not found", out["error"])
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_json_empty_keywords_is_json_error(self):
+        r = self._run(str(ROOT / "data" / "sample.json"), "--keywords", "", "--json")
+        self.assertEqual(r.returncode, 1)
+        out = json.loads(r.stdout)
+        self.assertIn("no usable keywords", out["error"])
+        self.assertNotIn("LEADS:", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Demand Miner v0.2.2 — turn captured public mentions into ranked buyer leads.
+Demand Miner v0.3.0 — turn captured public mentions into ranked buyer leads.
 
 The free answer to ₹8,500+/mo lead tools: you bring mentions captured from
 public posts/comments (social search, comment exports, forum threads); the
@@ -10,14 +10,17 @@ and source URL. No scraping, no logins, no outreach — mining only.
 Local, offline, Python 3 stdlib only. Spend: none.
 
 Usage:
-  python3 demand_miner.py CORPUS.json --keywords website,"web design",site [--min-score 4] [--csv leads.csv]
+  python3 demand_miner.py CORPUS.json --keywords website,"web design",site [--min-score 4] [--csv leads.csv] [--json]
+With --json, one JSON object is printed instead of the lead sheet
+(same counts, same leads, same exit codes; errors become {"error": ...}).
 Corpus: {"mentions":[{"source","text","url","author","engagement","date"}]}
 Exit codes: 0 ok, 1 error.
 """
 import argparse, csv, json, re, sys
 from pathlib import Path
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
+TOOL = "demand-miner"
 
 STRONG = ["looking for", "need someone", "need a ", "need an ", "hire", "hiring",
           "want to hire", "any recommendations", "recommend a", "recommend someone",
@@ -187,6 +190,29 @@ def render(result, keywords):
     return "\n".join(L)
 
 
+def render_json(result, keywords, min_score):
+    """The same lead sheet as render(), as one JSON object for agents."""
+    warnings = []
+    if result.get("skipped_malformed"):
+        warnings.append(
+            f"Skipped {result['skipped_malformed']} malformed mentions "
+            f"(not an object, no usable text, or non-numeric engagement — see README)")
+    leads = []
+    for lead in result["leads"]:
+        leads.append({
+            "score": lead["score"], "author": lead["author"], "source": lead["source"],
+            "location": lead["location"], "quote": lead["quote"], "url": lead["url"],
+            "signals": [s for s in (p.strip() for p in lead["signals"].split(",")) if s],
+        })
+    return json.dumps({
+        "tool": TOOL, "version": VERSION, "keywords": keywords, "min_score": min_score,
+        "scanned": result["scanned"], "sellers_filtered": result["sellers_filtered"],
+        "off_niche": result["off_niche"], "below_threshold": result["below_threshold"],
+        "skipped_malformed": result["skipped_malformed"],
+        "leads_count": len(leads), "leads": leads, "warnings": warnings,
+    }, indent=2)
+
+
 def extract_mentions(raw):
     """Pull the mentions list out of the parsed JSON.
     Structural problems get an error that says what to fix. (Per-mention
@@ -206,35 +232,53 @@ def extract_mentions(raw):
     raise ValueError('corpus file must be a JSON object with a "mentions" list (or a bare list of mentions)')
 
 
+def _fail(message, as_json):
+    if as_json:
+        print(json.dumps({"error": message}))
+    else:
+        print(f"ERROR: {message}")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description="Demand Miner — ranked buyer leads from public mentions")
     ap.add_argument("corpus")
     ap.add_argument("--keywords", required=True, help="comma-separated niche keywords")
     ap.add_argument("--min-score", type=int, default=4)
     ap.add_argument("--csv", help="also write leads to this CSV path")
+    ap.add_argument("--json", action="store_true",
+                    help="print one JSON object instead of the lead sheet")
     a = ap.parse_args()
     keywords = [k.strip().lower() for k in a.keywords.split(",") if k.strip()]
     if not keywords:
-        print("ERROR: no usable keywords — pass at least one keyword via --keywords "
-              "(e.g. --keywords website,\"web design\")")
-        return 1
+        return _fail("no usable keywords — pass at least one keyword via --keywords "
+                     "(e.g. --keywords website,\"web design\")", a.json)
     path = Path(a.corpus)
     if not path.exists():
-        print(f"ERROR: file not found: {path}")
-        return 1
+        return _fail(f"file not found: {path}", a.json)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         mentions = extract_mentions(raw)
         result = mine(mentions, keywords, a.min_score)
-        print(render(result, keywords))
-        if a.csv:
+
+        def write_csv():
             with open(a.csv, "w", newline="", encoding="utf-8") as f:
                 w = csv.DictWriter(f, fieldnames=["score", "author", "source", "location", "quote", "url", "signals"])
                 w.writeheader()
                 w.writerows(result["leads"])
+
+        if a.json:
+            # CSV first, so a write failure still yields exactly one
+            # JSON object on stdout (the error), never two.
+            if a.csv:
+                write_csv()
+            print(render_json(result, keywords, a.min_score))
+        else:
+            print(render(result, keywords))
+            if a.csv:
+                write_csv()
     except Exception as e:
-        print(f"ERROR: {e}")
-        return 1
+        return _fail(str(e), a.json)
     return 0
 
 

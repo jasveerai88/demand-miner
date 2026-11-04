@@ -9,6 +9,16 @@ Lead tools charge ₹8,500+/mo to watch public posts for buying intent. This min
 python3 src/demand_miner.py your-captures.json --keywords website,"web design",site --csv leads.csv
 ```
 
+## Use with AI agents
+
+Add `--json` to print one JSON object (same counts, same ranked leads, same exit codes; errors come back as `{"error": ...}`):
+
+```
+python3 src/demand_miner.py your-captures.json --keywords website,"web design",site --json
+```
+
+Agents: read [SKILL.md](SKILL.md) first — commands, the full JSON schema, exit codes, and the honesty rules (a lead is a scored mention, not a verified buyer).
+
 ## Measured, not marketed
 First version of this tool FAILED its own pre-registered accuracy test on real data (agencies beat its seller filter 3-to-2) — the failure and the fix are published in its lab notes. The current version re-ran the same data: on the verbatim raw-text corpus, every surviving lead (2 of 2) was a hand-verified real buyer; AI-summary captures stay unclean and are not a supported input. Yield depends on your captures; the miner's job is precision, and that part is proven.
 
@@ -23,7 +33,7 @@ Run on the bundled sample corpus (`data/sample.json` — 5 mentions: 2 buyers, 1
 
 ```
 $ python3 src/demand_miner.py data/sample.json --keywords website,"web design",site
-DEMAND MINER v0.2.1 — niche: website, web design, site
+DEMAND MINER v0.3.0 — niche: website, web design, site
 Scanned 5 mentions · 1 sellers filtered · 1 off-niche · 1 below the lead bar
 LEADS: 2
 
